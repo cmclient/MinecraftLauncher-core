@@ -46,8 +46,10 @@ class Handler {
       _request.on('response', (data) => {
         if (data.statusCode === 404) {
           this.client.emit('debug', `[MCLC]: Failed to download ${url} due to: File not found...`)
-          this.client.emit('error', new Error(`Failed to download asset from ${url} due to\nFile not found...`))
-          return resolve(false)
+          return resolve({
+            run: false,
+            message: new Error(`Failed to download asset from ${url} due to\nFile not found...`)
+          })
         }
 
         totalBytes = parseInt(data.headers['content-length'])
@@ -57,8 +59,10 @@ class Handler {
         this.client.emit('debug', `[MCLC]: Failed to download asset to ${path.join(directory, name)} due to\n${error}.` +
           ` Retrying... ${retry}`)
         if (retry) await this.downloadAsync(url, directory, name, false, type)
-        else this.client.emit('error', new Error(`Failed to download asset from ${url} due to\n${error}`))
-        resolve()
+        resolve({
+          run: false,
+          message: new Error(`Failed to download asset from ${url} due to\n${error}`)
+        })
       })
 
       _request.on('data', (data) => {
@@ -87,8 +91,10 @@ class Handler {
           ` Retrying... ${retry}`)
         if (fs.existsSync(path.join(directory, name))) fs.unlinkSync(path.join(directory, name))
         if (retry) await this.downloadAsync(url, directory, name, false, type)
-        else this.client.emit('error', new Error(`Failed to download asset from ${url} due to\n${e}`))
-        resolve()
+        resolve({
+          run: false,
+          message: new Error(`Failed to download asset from ${url} due to\n${e}`)
+        })
       })
     })
   }
@@ -98,8 +104,10 @@ class Handler {
       checksum.file(file, (err, sum) => {
         if (err) {
           this.client.emit('debug', `[MCLC]: Failed to check file hash due to ${err}`)
-          this.client.emit('error', new Error(`Failed to check file hash due to\n${err}`))
-          return resolve(false)
+          return resolve({
+            run: false,
+            message: new Error(`Failed to check file hash due to\n${err}`)
+          })
         }
         return resolve(hash === sum)
       })
