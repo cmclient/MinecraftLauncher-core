@@ -36,84 +36,106 @@ class Handler {
 
   downloadAsync(url, directory, name, retry, type) {
     return new Promise(resolve => {
-      fs.mkdirSync(directory, { recursive: true })
+      fs.mkdirSync(directory, { recursive: true });
 
-      const _request = this.baseRequest(url)
+      const filePath = path.join(directory, name);
+      const _request = this.baseRequest(url);
 
-      let receivedBytes = 0
-      let totalBytes = 0
+      let receivedBytes = 0;
+      let totalBytes = 0;
 
       _request.on('response', (data) => {
         if (data.statusCode === 404) {
-          this.client.emit('debug', `[MCLC]: Failed to download ${url} due to: File not found...`)
+          this.client.emit('debug', `[MCLC]: Failed to download ${url} due to: File not found...`);
           return resolve({
             run: false,
             message: new Error(`Failed to download asset from ${url} due to\nFile not found...`)
-          })
+          });
         }
+        totalBytes = parseInt(data.headers['content-length']);
+      });
 
-        totalBytes = parseInt(data.headers['content-length'])
-      })
+      const file = fs.createWriteStream(filePath);
+      _request.pipe(file);
 
       _request.on('error', async (error) => {
-        this.client.emit('debug', `[MCLC]: Failed to download asset to ${path.join(directory, name)} due to\n${error}.` +
-          ` Retrying... ${retry}`)
-        if (retry) await this.downloadAsync(url, directory, name, false, type)
+        if (!file.destroyed) file.destroy(); // Close file handle
+        this.client.emit('debug', `[MCLC]: Failed to download asset to ${filePath} due to\n${error}. Retrying... ${retry}`);
+
+        if (fs.existsSync(filePath)) {
+          try { await fs.promises.unlink(filePath); } catch (_) { }
+        }
+
+        if (retry) {
+          const download = await this.downloadAsync(url, directory, name, false, type);
+          return resolve(download);
+        }
+
         resolve({
           run: false,
           message: new Error(`Failed to download asset from ${url} due to\n${error}`)
-        })
-      })
+        });
+      });
 
       _request.on('data', (data) => {
-        receivedBytes += data.length
+        receivedBytes += data.length;
         this.client.emit('download-status', {
           name: name,
           type: type,
           current: receivedBytes,
           total: totalBytes
-        })
-      })
-
-      const file = fs.createWriteStream(path.join(directory, name))
-      _request.pipe(file)
+        });
+      });
 
       file.once('finish', () => {
-        this.client.emit('download', name)
+        this.client.emit('download', name);
         resolve({
           failed: false,
-          asset: null
-        })
-      })
+          asset: null,
+          run: true
+        });
+      });
 
       file.on('error', async (e) => {
-        this.client.emit('debug', `[MCLC]: Failed to download asset to ${path.join(directory, name)} due to\n${e}.` +
-          ` Retrying... ${retry}`)
-        if (fs.existsSync(path.join(directory, name))) fs.unlinkSync(path.join(directory, name))
-        if (retry) await this.downloadAsync(url, directory, name, false, type)
+        if (!file.destroyed) file.destroy(); // Close before deleting
+        this.client.emit('debug', `[MCLC]: Failed to write ${filePath}: ${e}. Retrying... ${retry}`);
+
+        if (fs.existsSync(filePath)) {
+          try { await fs.promises.unlink(filePath); } catch (_) { }
+        }
+
+        if (retry) {
+          const download = await this.downloadAsync(url, directory, name, false, type);
+          return resolve(download);
+        }
+
         resolve({
           run: false,
-          message: new Error(`Failed to download asset from ${url} due to\n${e}`)
-        })
-      })
-    })
+          message: new Error(`Failed to write ${url}: ${e}`)
+        });
+      });
+    });
   }
 
   checkSum(hash, file) {
-    return new Promise((resolve, reject) => {
-      checksum.file(file, (err, sum) => {
-        if (err) {
-          this.client.emit('debug', `[MCLC]: Failed to check file hash due to ${err}`)
-          return resolve({
-            run: false,
-            message: new Error(`Failed to check file hash due to\n${err}`)
-          })
-        }
-        return resolve(hash === sum)
-      })
-    })
-  }
+    return new Promise((resolve) => {
+      if (!fs.existsSync(file)) {
+        return resolve(false);
+      }
 
+      if (fs.statSync(file).size === 0) {
+        return resolve(false);
+      }
+
+      checksum.file(file, { algorithm: 'sha1' }, (err, sum) => {
+        if (err) {
+          this.client.emit('debug', `[MCLC]: Failed to check file hash due to ${err}`);
+          return resolve(false);
+        }
+        resolve(hash === sum);
+      });
+    });
+  }
   getVersion() {
     return new Promise(resolve => {
       const versionJsonPath = this.options.overrides.versionJson || path.join(this.options.directory, `${this.options.version.number}.json`)
@@ -164,7 +186,10 @@ class Handler {
   }
 
   async getJar() {
-    await this.downloadAsync(this.version.downloads.client.url, this.options.directory, `${this.options.version.custom ? this.options.version.custom : this.options.version.number}.jar`, true, 'version-jar')
+    const download = await this.downloadAsync(this.version.downloads.client.url, this.options.directory, `${this.options.version.custom ? this.options.version.custom : this.options.version.number}.jar`, true, 'version-jar')
+    if (!download.run) {
+      throw new Error(`Failed to download client jar`)
+    }
     fs.writeFileSync(path.join(this.options.directory, `${this.options.version.number}.json`), JSON.stringify(this.version, null, 4))
     return this.client.emit('debug', '[MCLC]: Downloaded version jar and wrote version json')
   }
@@ -173,7 +198,10 @@ class Handler {
     const assetDirectory = path.resolve(this.options.overrides.assetRoot || path.join(this.options.root, 'assets'))
     const assetId = this.options.version.custom || this.options.version.number
     if (!fs.existsSync(path.join(assetDirectory, 'indexes', `${assetId}.json`))) {
-      await this.downloadAsync(this.version.assetIndex.url, path.join(assetDirectory, 'indexes'), `${assetId}.json`, true, 'asset-json')
+      const download = await this.downloadAsync(this.version.assetIndex.url, path.join(assetDirectory, 'indexes'), `${assetId}.json`, true, 'asset-json')
+      if (!download.run) {
+        throw new Error(`Failed to download assets indexes`)
+      }
     }
 
     const index = JSON.parse(fs.readFileSync(path.join(assetDirectory, 'indexes', `${assetId}.json`), { encoding: 'utf8' }))
@@ -190,7 +218,10 @@ class Handler {
       const subAsset = path.join(assetDirectory, 'objects', subhash)
 
       if (!fs.existsSync(path.join(subAsset, hash)) || !await this.checkSum(hash, path.join(subAsset, hash))) {
-        await this.downloadAsync(`${this.options.overrides.url.resource}/${subhash}/${hash}`, subAsset, hash, true, 'assets')
+        const download = await this.downloadAsync(`${this.options.overrides.url.resource}/${subhash}/${hash}`, subAsset, hash, true, 'assets')
+        if (!download.run) {
+          throw new Error(`Failed to download client assets`)
+        }
       }
       counter++
       this.client.emit('progress', {
@@ -294,9 +325,12 @@ class Handler {
       await Promise.all(stat.map(async (native) => {
         if (!native) return
         const name = native.url.replace("https://libraries.minecraft.net/", "").split('/').pop()//native.path.split('/').pop()
-        await this.downloadAsync(native.url, nativeDirectory, name, true, 'natives')
-        if (!await this.checkSum(native.sha1, path.join(nativeDirectory, name))) {
-          await this.downloadAsync(native.url, nativeDirectory, name, true, 'natives')
+        const download = await this.downloadAsync(native.url, nativeDirectory, name, true, 'natives')
+        if (!download.run || !await this.checkSum(native.sha1, path.join(nativeDirectory, name))) {
+          const download = await this.downloadAsync(native.url, nativeDirectory, name, true, 'natives')
+          if (!download.run) {
+            throw new Error(`Failed to download client natives`)
+          }
         }
         try {
           new Zip(path.join(nativeDirectory, name)).extractAllTo(nativeDirectory, true)
@@ -504,16 +538,26 @@ class Handler {
       const downloadLibrary = async library => {
         if (library.url) {
           const url = `${library.url}${lib[0].replace(/\./g, '/')}/${lib[1]}/${lib[2]}/${name}`
-          await this.downloadAsync(url, jarPath, name, true, eventName)
+          const download = await this.downloadAsync(url, jarPath, name, true, eventName)
+          if (!download.run) {
+            throw new Error(`Failed to download client library ${library.name}`)
+          }
         } else if (library.downloads && library.downloads.artifact && library.downloads.artifact.url) {
           // Only download if there's a URL provided. If not, we're assuming it's going a generated dependency.
-          await this.downloadAsync(library.downloads.artifact.url, jarPath, name, true, eventName)
+          const download = await this.downloadAsync(library.downloads.artifact.url, jarPath, name, true, eventName)
+          if (!download.run) {
+            throw new Error(`Failed to download client library ${library.name}`)
+          }
         }
       }
 
       if (!fs.existsSync(path.join(jarPath, name))) await downloadLibrary(library)
+
       if (library.downloads && library.downloads.artifact) {
-        if (!this.checkSum(library.downloads.artifact.sha1, path.join(jarPath, name))) await downloadLibrary(library)
+        if (!await this.checkSum(library.downloads.artifact.sha1, path.join(jarPath, name))) {
+          this.client.emit('debug', `[MCLC]: Checksum mismatch for ${name}, re-downloading...`);
+          await downloadLibrary(library)
+        }
       }
 
       counter++
@@ -733,7 +777,10 @@ class Handler {
 
   async extractPackage(options = this.options) {
     if (options.clientPackage.startsWith('http')) {
-      await this.downloadAsync(options.clientPackage, options.root, 'clientPackage.zip', true, 'client-package')
+      const download = await this.downloadAsync(options.clientPackage, options.root, 'clientPackage.zip', true, 'client-package')
+      if (!download.run) {
+        throw new Error(`Failed to download client package`)
+      }
       options.clientPackage = path.join(options.root, 'clientPackage.zip')
     }
     new Zip(options.clientPackage).extractAllTo(options.root, true)

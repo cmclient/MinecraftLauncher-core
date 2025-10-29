@@ -5,7 +5,7 @@ const fs = require('fs')
 const EventEmitter = require('events').EventEmitter
 
 class MCLCore extends EventEmitter {
-  async launch (options) {
+  async launch(options) {
     try {
       this.options = { ...options }
       this.options.root = path.resolve(this.options.root)
@@ -39,9 +39,7 @@ class MCLCore extends EventEmitter {
 
       const java = await this.handler.checkJava(this.options.javaPath || 'java')
       if (!java.run) {
-        this.emit('debug', `[MCLC]: Couldn't start Minecraft due to: ${java.message}`)
-        this.emit('close', 1)
-        return null
+        throw new Error(`Couldn't verify Java due to: ${java.message}`)
       }
 
       this.createRootDirectory()
@@ -95,12 +93,24 @@ class MCLCore extends EventEmitter {
           const configPath = path.resolve(this.options.overrides.cwd || this.options.root)
           const intVersion = parseInt(versionFile.id.split('.')[1])
           if (intVersion >= 12) {
-            await this.handler.downloadAsync('https://launcher.mojang.com/v1/objects/02937d122c86ce73319ef9975b58896fc1b491d1/log4j2_112-116.xml',
+            const download = await this.handler.downloadAsync('https://launcher.mojang.com/v1/objects/02937d122c86ce73319ef9975b58896fc1b491d1/log4j2_112-116.xml',
               configPath, 'log4j2_112-116.xml', true, 'log4j')
+            if (!download.run) {
+              this.emit('error', new Error(`Failed to download log4j patch due`))
+              this.emit('debug', `[MCLC]: Couldn't start Minecraft due to: ${download.message}`)
+              this.emit('close', null)
+              return null
+            }
             jvm.push('-Dlog4j.configurationFile=log4j2_112-116.xml')
           } else if (intVersion >= 7) {
-            await this.handler.downloadAsync('https://launcher.mojang.com/v1/objects/dd2b723346a8dcd48e7f4d245f6bf09e98db9696/log4j2_17-111.xml',
+            const download = await this.handler.downloadAsync('https://launcher.mojang.com/v1/objects/dd2b723346a8dcd48e7f4d245f6bf09e98db9696/log4j2_17-111.xml',
               configPath, 'log4j2_17-111.xml', true, 'log4j')
+            if (!download.run) {
+              this.emit('error', new Error(`Failed to download log4j patch`))
+              this.emit('debug', `[MCLC]: Couldn't start Minecraft due to: ${download.message}`)
+              this.emit('close', null)
+              return null
+            }
             jvm.push('-Dlog4j.configurationFile=log4j2_17-111.xml')
           }
         }
@@ -131,26 +141,27 @@ class MCLCore extends EventEmitter {
 
       return this.startMinecraft(launchArguments)
     } catch (e) {
+      this.emit('error', e)
       this.emit('debug', `[MCLC]: Failed to start due to ${e}, closing...`)
       return null
     }
   }
 
-  printVersion () {
+  printVersion() {
     if (fs.existsSync(path.join(__dirname, '..', 'package.json'))) {
       const { version } = require('../package.json')
       this.emit('debug', `[MCLC]: MCLC version ${version}`)
     } else { this.emit('debug', '[MCLC]: Package JSON not found, skipping MCLC version check.') }
   }
 
-  createRootDirectory () {
+  createRootDirectory() {
     if (!fs.existsSync(this.options.root)) {
       this.emit('debug', '[MCLC]: Attempting to create root folder')
       fs.mkdirSync(this.options.root)
     }
   }
 
-  createGameDirectory () {
+  createGameDirectory() {
     if (this.options.overrides.gameDirectory) {
       this.options.overrides.gameDirectory = path.resolve(this.options.overrides.gameDirectory)
       if (!fs.existsSync(this.options.overrides.gameDirectory)) {
@@ -159,14 +170,14 @@ class MCLCore extends EventEmitter {
     }
   }
 
-  async extractPackage () {
+  async extractPackage() {
     if (this.options.clientPackage) {
       this.emit('debug', `[MCLC]: Extracting client package to ${this.options.root}`)
       await this.handler.extractPackage()
     }
   }
 
-  async getModifyJson () {
+  async getModifyJson() {
     let modifyJson = null
 
     console.log('verjson', this.options.overrides.versionJson)
@@ -183,7 +194,7 @@ class MCLCore extends EventEmitter {
     return modifyJson
   }
 
-  startMinecraft (launchArguments) {
+  startMinecraft(launchArguments) {
     const minecraft = child.spawn(this.options.javaPath ? this.options.javaPath : 'java', launchArguments,
       { cwd: this.options.overrides.cwd || this.options.root, detached: this.options.overrides.detached })
     minecraft.stdout.on('data', (data) => this.emit('data', data.toString('utf-8')))
