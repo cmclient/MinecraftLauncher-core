@@ -7,7 +7,7 @@ const child = require('child_process')
 let counter = 0
 
 class Handler {
-  constructor (client) {
+  constructor(client) {
     this.client = client
     this.options = client.options
     this.baseRequest = request.defaults({
@@ -16,7 +16,7 @@ class Handler {
     })
   }
 
-  checkJava (java) {
+  checkJava(java) {
     return new Promise(resolve => {
       child.exec(`"${java}" -version`, (error, stdout, stderr) => {
         if (error) {
@@ -34,7 +34,7 @@ class Handler {
     })
   }
 
-  downloadAsync (url, directory, name, retry, type) {
+  downloadAsync(url, directory, name, retry, type) {
     return new Promise(resolve => {
       fs.mkdirSync(directory, { recursive: true })
 
@@ -46,6 +46,7 @@ class Handler {
       _request.on('response', (data) => {
         if (data.statusCode === 404) {
           this.client.emit('debug', `[MCLC]: Failed to download ${url} due to: File not found...`)
+          this.client.emit('error', new Error(`Failed to download asset from ${url} due to\nFile not found...`))
           return resolve(false)
         }
 
@@ -54,8 +55,9 @@ class Handler {
 
       _request.on('error', async (error) => {
         this.client.emit('debug', `[MCLC]: Failed to download asset to ${path.join(directory, name)} due to\n${error}.` +
-                    ` Retrying... ${retry}`)
+          ` Retrying... ${retry}`)
         if (retry) await this.downloadAsync(url, directory, name, false, type)
+        else this.client.emit('error', new Error(`Failed to download asset from ${url} due to\n${error}`))
         resolve()
       })
 
@@ -82,19 +84,21 @@ class Handler {
 
       file.on('error', async (e) => {
         this.client.emit('debug', `[MCLC]: Failed to download asset to ${path.join(directory, name)} due to\n${e}.` +
-                    ` Retrying... ${retry}`)
+          ` Retrying... ${retry}`)
         if (fs.existsSync(path.join(directory, name))) fs.unlinkSync(path.join(directory, name))
         if (retry) await this.downloadAsync(url, directory, name, false, type)
+        else this.client.emit('error', new Error(`Failed to download asset from ${url} due to\n${e}`))
         resolve()
       })
     })
   }
 
-  checkSum (hash, file) {
+  checkSum(hash, file) {
     return new Promise((resolve, reject) => {
       checksum.file(file, (err, sum) => {
         if (err) {
           this.client.emit('debug', `[MCLC]: Failed to check file hash due to ${err}`)
+          this.client.emit('error', new Error(`Failed to check file hash due to\n${err}`))
           return resolve(false)
         }
         return resolve(hash === sum)
@@ -102,7 +106,7 @@ class Handler {
     })
   }
 
-  getVersion () {
+  getVersion() {
     return new Promise(resolve => {
       const versionJsonPath = this.options.overrides.versionJson || path.join(this.options.directory, `${this.options.version.number}.json`)
       if (fs.existsSync(versionJsonPath)) {
@@ -151,13 +155,13 @@ class Handler {
     })
   }
 
-  async getJar () {
+  async getJar() {
     await this.downloadAsync(this.version.downloads.client.url, this.options.directory, `${this.options.version.custom ? this.options.version.custom : this.options.version.number}.jar`, true, 'version-jar')
     fs.writeFileSync(path.join(this.options.directory, `${this.options.version.number}.json`), JSON.stringify(this.version, null, 4))
     return this.client.emit('debug', '[MCLC]: Downloaded version jar and wrote version json')
   }
 
-  async getAssets () {
+  async getAssets() {
     const assetDirectory = path.resolve(this.options.overrides.assetRoot || path.join(this.options.root, 'assets'))
     const assetId = this.options.version.custom || this.options.version.number
     if (!fs.existsSync(path.join(assetDirectory, 'indexes', `${assetId}.json`))) {
@@ -234,7 +238,7 @@ class Handler {
     this.client.emit('debug', '[MCLC]: Downloaded assets')
   }
 
-  parseRule (lib) {
+  parseRule(lib) {
     if (lib.rules) {
       if (lib.rules.length > 1) {
         if (lib.rules[0].action === 'allow' && lib.rules[1].action === 'disallow' && lib.rules[1].os.name === 'osx') {
@@ -249,7 +253,7 @@ class Handler {
     }
   }
 
-  async getNatives () {
+  async getNatives() {
     const nativeDirectory = path.resolve(this.options.overrides.natives || path.join(this.options.root, 'natives', this.version.id))
 
     if (parseInt(this.version.id.split('.')[1]) >= 19) return this.options.overrides.cwd || this.options.root
@@ -311,7 +315,7 @@ class Handler {
     return nativeDirectory
   }
 
-  fwAddArgs () {
+  fwAddArgs() {
     const forgeWrapperAgrs = [
       `-Dforgewrapper.librariesDir=${path.resolve(this.options.overrides.libraryRoot || path.join(this.options.root, 'libraries'))}`,
       `-Dforgewrapper.installer=${this.options.forge}`,
@@ -322,11 +326,11 @@ class Handler {
       : this.options.customArgs = forgeWrapperAgrs
   }
 
-  isModernForge (json) {
+  isModernForge(json) {
     return json.inheritsFrom && json.inheritsFrom.split('.')[1] >= 12 && !(json.inheritsFrom === '1.12.2' && (json.id.split('.')[json.id.split('.').length - 1]) === '2847')
   }
 
-  async getForgedWrapped () {
+  async getForgedWrapped() {
     let json = null
     let installerJson = null
     const versionPath = path.join(this.options.root, 'forge', `${this.version.id}`, 'version.json')
@@ -471,7 +475,7 @@ class Handler {
     return json
   }
 
-  async downloadToDirectory (directory, libraries, eventName) {
+  async downloadToDirectory(directory, libraries, eventName) {
     const libs = []
 
     await Promise.all(libraries.map(async library => {
@@ -517,7 +521,7 @@ class Handler {
     return libs
   }
 
-  async getClasses (classJson) {
+  async getClasses(classJson) {
     let libs = []
 
     const libraryDirectory = path.resolve(this.options.overrides.libraryRoot || path.join(this.options.root, 'libraries'))
@@ -545,15 +549,15 @@ class Handler {
     return libs
   }
 
-  popString (path) {
+  popString(path) {
     return path.split('/').slice(0, -1).join('/')
   }
 
-  cleanUp (array) {
+  cleanUp(array) {
     return [...new Set(Object.values(array).filter(value => value !== null))]
   }
 
-  formatQuickPlay () {
+  formatQuickPlay() {
     const types = {
       singleplayer: '--quickPlaySingleplayer',
       multiplayer: '--quickPlayMultiplayer',
@@ -573,7 +577,7 @@ class Handler {
     return returnArgs
   }
 
-  async getLaunchOptions (modification) {
+  async getLaunchOptions(modification) {
     const type = Object.assign({}, this.version, modification)
 
     let args = type.minecraftArguments
@@ -675,7 +679,7 @@ class Handler {
     return args
   }
 
-  async getJVM () {
+  async getJVM() {
     const opts = {
       windows: '-XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump',
       osx: '-XstartOnFirstThread',
@@ -684,11 +688,11 @@ class Handler {
     return opts[this.getOS()]
   }
 
-  isLegacy () {
+  isLegacy() {
     return this.version.assets === 'legacy' || this.version.assets === 'pre-1.6'
   }
 
-  getOS () {
+  getOS() {
     if (this.options.os) {
       return this.options.os
     } else {
@@ -701,7 +705,7 @@ class Handler {
   }
 
   // To prevent launchers from breaking when they update. Will be reworked with rewrite.
-  getMemory () {
+  getMemory() {
     if (!this.options.memory) {
       this.client.emit('debug', '[MCLC]: Memory not set! Setting 1GB as MAX!')
       this.options.memory = {
@@ -719,7 +723,7 @@ class Handler {
     } else { return [`${this.options.memory.max}`, `${this.options.memory.min}`] }
   }
 
-  async extractPackage (options = this.options) {
+  async extractPackage(options = this.options) {
     if (options.clientPackage.startsWith('http')) {
       await this.downloadAsync(options.clientPackage, options.root, 'clientPackage.zip', true, 'client-package')
       options.clientPackage = path.join(options.root, 'clientPackage.zip')
