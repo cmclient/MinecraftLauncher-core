@@ -39,7 +39,7 @@ class MCLCore extends EventEmitter {
 
       const java = await this.handler.checkJava(this.options.javaPath || 'java')
       if (!java.run) {
-        throw new Error(`Couldn't verify Java due to: ${java.message}`)
+        throw new Error(`Couldn't verify Java due to\n${java.message}`)
       }
 
       this.createRootDirectory()
@@ -96,7 +96,7 @@ class MCLCore extends EventEmitter {
             const download = await this.handler.downloadAsync('https://launcher.mojang.com/v1/objects/02937d122c86ce73319ef9975b58896fc1b491d1/log4j2_112-116.xml',
               configPath, 'log4j2_112-116.xml', true, 'log4j')
             if (!download.run) {
-              this.emit('error', new Error(`Failed to download log4j patch due`))
+              this.emit('error', new Error(`Failed to download log4j patch due to: ${download.message}`))
               this.emit('debug', `[MCLC]: Couldn't start Minecraft due to: ${download.message}`)
               this.emit('close', null)
               return null
@@ -106,7 +106,7 @@ class MCLCore extends EventEmitter {
             const download = await this.handler.downloadAsync('https://launcher.mojang.com/v1/objects/dd2b723346a8dcd48e7f4d245f6bf09e98db9696/log4j2_17-111.xml',
               configPath, 'log4j2_17-111.xml', true, 'log4j')
             if (!download.run) {
-              this.emit('error', new Error(`Failed to download log4j patch`))
+              this.emit('error', new Error(`Failed to download log4j patch due to: ${download.message}`))
               this.emit('debug', `[MCLC]: Couldn't start Minecraft due to: ${download.message}`)
               this.emit('close', null)
               return null

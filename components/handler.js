@@ -188,7 +188,7 @@ class Handler {
   async getJar() {
     const download = await this.downloadAsync(this.version.downloads.client.url, this.options.directory, `${this.options.version.custom ? this.options.version.custom : this.options.version.number}.jar`, true, 'version-jar')
     if (!download.run) {
-      throw new Error(`Failed to download client jar`)
+      throw new Error(`Failed to download client jar due to\n${download.message}`)
     }
     fs.writeFileSync(path.join(this.options.directory, `${this.options.version.number}.json`), JSON.stringify(this.version, null, 4))
     return this.client.emit('debug', '[MCLC]: Downloaded version jar and wrote version json')
@@ -200,7 +200,7 @@ class Handler {
     if (!fs.existsSync(path.join(assetDirectory, 'indexes', `${assetId}.json`))) {
       const download = await this.downloadAsync(this.version.assetIndex.url, path.join(assetDirectory, 'indexes'), `${assetId}.json`, true, 'asset-json')
       if (!download.run) {
-        throw new Error(`Failed to download assets indexes`)
+        throw new Error(`Failed to download assets indexes due to\n${download.message}`)
       }
     }
 
@@ -220,7 +220,7 @@ class Handler {
       if (!fs.existsSync(path.join(subAsset, hash)) || !await this.checkSum(hash, path.join(subAsset, hash))) {
         const download = await this.downloadAsync(`${this.options.overrides.url.resource}/${subhash}/${hash}`, subAsset, hash, true, 'assets')
         if (!download.run) {
-          throw new Error(`Failed to download client assets`)
+          throw new Error(`Failed to download client assets due to\n${download.message}`)
         }
       }
       counter++
@@ -329,7 +329,7 @@ class Handler {
         if (!download.run || !await this.checkSum(native.sha1, path.join(nativeDirectory, name))) {
           const download = await this.downloadAsync(native.url, nativeDirectory, name, true, 'natives')
           if (!download.run) {
-            throw new Error(`Failed to download client natives`)
+            throw new Error(`Failed to download client natives due to\n${download.message}`)
           }
         }
         try {
@@ -540,13 +540,13 @@ class Handler {
           const url = `${library.url}${lib[0].replace(/\./g, '/')}/${lib[1]}/${lib[2]}/${name}`
           const download = await this.downloadAsync(url, jarPath, name, true, eventName)
           if (!download.run) {
-            throw new Error(`Failed to download client library ${library.name}`)
+            throw new Error(`Failed to download client library ${library.name} due to\n${download.message}`)
           }
         } else if (library.downloads && library.downloads.artifact && library.downloads.artifact.url) {
           // Only download if there's a URL provided. If not, we're assuming it's going a generated dependency.
           const download = await this.downloadAsync(library.downloads.artifact.url, jarPath, name, true, eventName)
           if (!download.run) {
-            throw new Error(`Failed to download client library ${library.name}`)
+            throw new Error(`Failed to download client library ${library.name} due to\n${download.message}`)
           }
         }
       }
@@ -779,7 +779,7 @@ class Handler {
     if (options.clientPackage.startsWith('http')) {
       const download = await this.downloadAsync(options.clientPackage, options.root, 'clientPackage.zip', true, 'client-package')
       if (!download.run) {
-        throw new Error(`Failed to download client package`)
+        throw new Error(`Failed to download client package due to\n${download.message}`)
       }
       options.clientPackage = path.join(options.root, 'clientPackage.zip')
     }
